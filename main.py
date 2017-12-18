@@ -376,8 +376,6 @@ class main:
                 else:
                     start_time = str(latest_cal_time['MAX(time)'].iloc[0])  # 已经计算的最新时间
                 end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')[0:10] + " 00:00:00"
-                start_time = "2017-12-15 00:00:00"  # 已经计算的最新时间
-                end_time = "2017-12-16 00:00:00"
                 print(str(self.cal_farm_table_path[farm][row:row+1]['wtgs_id'].iloc[0]),start_time, end_time)
                 Turbine(self.table, self.time_delta, self.cal_farm_table_path[farm][row:row+1], start_time, end_time, self.author)
 
