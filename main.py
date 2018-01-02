@@ -6,23 +6,24 @@
 # @File    : main.py
 # @Software: PyCharm
 
-# TODO
 # TODO-增加输出各大部件的标签点的评估结果（A,B,C,D)
 
 import copy
 import datetime
 import sqlite3
 from datetime import *
-
 import numpy as np
 import pandas as pd
 import pymysql
-
 import config
+from multiprocessing import  Pool
+from getDatasFromGolden import get
 
+output_path="E:/work/PHM/模糊评价/验证/"
 
 class Component: # 部件级别
-    def __init__(self, comp_name, tag, deterioration_data, weight_data):
+    def __init__(self, table, comp_name, tag, deterioration_data, weight_data):
+        self.table=table
         self.name=comp_name
         self.tags = tag
         self.key_tags()
@@ -41,7 +42,7 @@ class Component: # 部件级别
             id = np.where(res == max(res))
             self.deterioration_data_name['status'].iloc[i] = config.STATUS_LEVEL[id[0][0]]
             self.eva_res[self.weight_data.index[i]]= config.STATUS_LEVEL[id[0][0]]
-        self.deterioration_data_name.to_csv('E:/work/PHM/模糊评价/验证/'+self.name+'.csv')
+        # self.deterioration_data_name.to_csv(output_path+self.table+"/"+self.name+'.csv')
 
     def key_tags(self):
         self.itags={}
@@ -100,7 +101,7 @@ class Component: # 部件级别
             return 1
 
 class Turbine: # 整机
-    def __init__(self,table, time_delta, db_path,start_time,end_time,author):
+    def __init__(self, db_path,start_time,end_time):
         self.unitSet= config.COM_NAME
         self.farm_name=db_path['farm_name'].iloc[0]
         self.wtgs_name=db_path['wtgs_name'].iloc[0]
@@ -108,15 +109,17 @@ class Turbine: # 整机
         self.db_path = db_path.iloc[0].tolist()
         self.start_time = start_time
         self.end_time = end_time
-        self.author = author
-        self.table=table
-        self.time_delta=time_delta
+        self.author = config.ANALYSOR
         self.real_data=self.query_real_data(self.db_path)  # 查询真实存储值
-        self.real_data.to_excel("E:\work\PHM\模糊评价\验证\运行数据.xlsx")
-        min_avg_data = self.mins_avg_value()  # 1分钟平均值
-        self.run_data = min_avg_data[(min_avg_data['grPitchAngle1A'] < 89) & (min_avg_data['grPitchAngle2A'] < 89) & (min_avg_data['grPitchAngle3A'] < 89)]  # 非停机时间
-        self.stop_data = min_avg_data[(min_avg_data['grPitchAngle1A'] >= 89) | (min_avg_data['grPitchAngle2A'] >= 89) | (min_avg_data['grPitchAngle3A'] >= 89)]  # 停机时间
-        self.eva_process()
+        # self.real_data.to_csv(output_path+"运行数据.csv")
+        for table, time_delta in config.TABLE_MINS_ARGV.items(): # 循环计算各计算类型
+            self.table=table
+            self.time_delta=int(time_delta)
+            print('run time:' + datetime.now().strftime('%Y-%m-%d %H:%M:%S'), table)
+            min_avg_data = self.mins_avg_value()  # 平均值
+            self.run_data = min_avg_data[(min_avg_data['grPitchAngle1A'] < 89) & (min_avg_data['grPitchAngle2A'] < 89) & (min_avg_data['grPitchAngle3A'] < 89)]  # 非停机时间
+            self.stop_data = min_avg_data[(min_avg_data['grPitchAngle1A'] >= 89) | (min_avg_data['grPitchAngle2A'] >= 89) | (min_avg_data['grPitchAngle3A'] >= 89)]  # 停机时间
+            self.eva_process()
 
     def key_tags(self):
         # 从配置文件.xlsx读取标签点名(EN,CH)
@@ -147,7 +150,7 @@ class Turbine: # 整机
             eva_res = {}
             export_res=[]
             for iunit_name in self.unitSet:# loop the unit
-                iunit_eva=Component(iunit_name, self.tag, deter_value, weight)
+                iunit_eva=Component(self.table, iunit_name, self.tag, deter_value, weight)
                 iunit_eva.calculate()
                 for key in iunit_eva.eva_res.keys():
                     if key not in eva_res.keys():
@@ -159,41 +162,30 @@ class Turbine: # 整机
                                         eva_res[key][4],eva_res[key][5],eva_res[key][6],eva_res[key][7],max(eva_res[key]),datetime.now().strftime('%Y-%m-%d %H:%M:%S'),self.author])
             for timestamp in self.stop_data.index:
                 export_res.append([self.db_path[0], int(self.db_path[1]), int(self.db_path[2]), timestamp, 'E', 'E', 'E','E','E', 'E', 'E', 'E','E', datetime.now().strftime('%Y-%m-%d %H:%M:%S'), self.author])
-            # self.export2DB(export_res)
+            self.export2DB(export_res)
 
     def query_real_data(self, path):
         # query original data of turbine from remote database
-        query_field=''
+        query_field=[]
+        combinaFileds=[]
         for i,key in zip(range(len(self.tag_set.keys())),list(self.tag_set.keys())):
-            if i!=len(self.tag_set.keys())-1:
-                query_field+=self.tag_set[key]+','
-            else:
-                query_field += self.tag_set[key]
-        query_condition =''
-        for i,key in zip(range(len(self.tag_set.keys())),self.tag_set.keys()):
-            if i!=len(self.tag_set.keys())-1:
-                query_condition+=self.tag_set[key]+' is not null and '
-            else:
-                query_condition += self.tag_set[key]+' is not null '
-        sqlstr = "SELECT real_time," + query_field + " FROM " + path[6] + " WHERE " + query_condition + "AND real_time BETWEEN \'" + \
-                 self.start_time+"\' AND \'" + self.end_time+"\' ORDER BY real_time "
-        print(sqlstr)
-        (conn, cur) = mysql_conn(path[3], int(path[4]), config.REMOTE_DB['_user'], config.REMOTE_DB['_passwd'], path[5])
-        real_data = pd.read_sql(sqlstr, con=conn)
-        real_data.index=list(real_data['real_time'])
-        real_data = real_data.drop('real_time', 1)
-        conn.close()
+            if '/' not in self.tag_set[key] and '-' not in self.tag_set[key]:#非组合类指标
+                query_field.append(self.tag_set[key])
+            else: # 组合类指标
+                combinaFileds.append(self.tag_set[key])
+        real_data=get.OneWtgsWithMultiTags(wtgs_id=str(path[2]),tag_list=query_field,start_time=self.start_time,end_time=self.end_time)
+        for filed in combinaFileds:
+            if '/' in filed:
+                filedlist=filed.split('/')
+                real_data[filed]=list((real_data[filedlist[0]]/real_data[filedlist[1]]).values)
+            elif '-' in filed and '|' in filed:
+                filedlist = filed.split('-')
+                real_data[filed] = [abs(item) for item in list((real_data[filedlist[0][1:]]-real_data[filedlist[1][:-1]]).values)]
         return real_data
 
     def mins_avg_value(self): # 生成时间戳序列
-        timestampstr = []
+        timestampstr = list(pd.date_range(start=self.start_time,end=self.end_time,freq=str(self.time_delta)+'S').strftime("%Y-%m-%d %H:%M:%S"))
         real_data_min_avg={}
-        starttimestamp = datetime.strptime(self.start_time, "%Y-%m-%d %H:%M:%S")
-        endtimestmp = datetime.strptime(self.end_time, "%Y-%m-%d %H:%M:%S")
-        timestamp = starttimestamp
-        while timestamp <= endtimestmp:
-            timestampstr.append(str(timestamp))
-            timestamp += timedelta(seconds=self.time_delta)
         for mintimestamp in timestampstr:
             mintimestamp=datetime.strptime(mintimestamp, "%Y-%m-%d %H:%M:%S")
             ts1 = mintimestamp + timedelta(seconds=self.time_delta / 2)
@@ -204,10 +196,11 @@ class Turbine: # 整机
             # TODO-取平均值之前是否需要排除异常值
             selectedata.dropna(axis=0)
             if len(selectedata)>0:
-                real_data_min_avg[mintimestamp]=list(selectedata.mean())
+                real_data_min_avg[mintimestamp.strftime('%Y-%m-%d %H:%M:%S')]=list(selectedata.mean())
         self.tag_EN=list(self.real_data.columns)
-        real_data = pd.DataFrame(real_data_min_avg, index=self.tag_EN)
-        real_data=real_data.T
+        real_data = pd.DataFrame.from_dict(real_data_min_avg)
+        real_data = real_data.T
+        real_data.columns=self.tag_EN[1:]
         return real_data
 
     def alpha_beta_cal(self): # 若参数表没有提供alpha,beta，则根据该方法计算
@@ -320,7 +313,7 @@ class Turbine: # 整机
                     else:
                         value += ');'
             sqlstr += value
-            #print(sqlstr)
+            print(sqlstr)
             try:
                 cur.execute(sqlstr)
                 conn.commit()
@@ -357,27 +350,35 @@ def sqlite_conn():
     return conn, cur
 
 class main:
-    def __init__(self, table, time_delta, author):
-        self.author = author
-        self.table=table
-        self.time_delta=time_delta
+    def __init__(self):
+        self.author = config.ANALYSOR
         [self.cal_farm_list,self.cal_farm_table_path]=self.farm_path()
         self.loop()
 
     def loop(self):
+        p = Pool(4)
         for farm in self.cal_farm_table_path:
             for row in range(len(self.cal_farm_table_path[farm])):
-                conn = pymysql.connect(host='192.168.0.19', port=3306, user='llj', passwd='llj@2016', db='iot_wind',charset="utf8")
-                sqlstr = "SELECT MAX(time) FROM " + table +" WHERE wtgs_id=\'"+str(self.cal_farm_table_path[farm][row:row+1]['wtgs_id'].iloc[0])+"\'"
-                latest_cal_time = pd.read_sql(sql=sqlstr, con=conn)
-                conn.close()
-                if latest_cal_time['MAX(time)'].iloc[0] is None:
-                    start_time = "2017-12-01 00:00:00"
-                else:
-                    start_time = str(latest_cal_time['MAX(time)'].iloc[0])  # 已经计算的最新时间
-                end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')[0:10] + " 00:00:00"
-                print(str(self.cal_farm_table_path[farm][row:row+1]['wtgs_id'].iloc[0]),start_time, end_time)
-                Turbine(self.table, self.time_delta, self.cal_farm_table_path[farm][row:row+1], start_time, end_time, self.author)
+                wtgs_path=self.cal_farm_table_path[farm][row:row + 1]
+                if wtgs_path['wtgs_id'].iloc[0]==20004003:
+                    p.apply_async(self.multiProcessTask, args=(wtgs_path,))
+        p.close()
+        p.join()
+
+    def multiProcessTask(self,wtgs_path):
+        # start_time = "2017-12-14 00:00:00"
+        # end_time = "2017-12-15 00:00:00"
+        conn = pymysql.connect(host='192.168.0.19', port=3306, user='llj', passwd='llj@2016', db='iot_wind',charset="utf8")
+        sqlstr = "SELECT MAX(time) FROM " + self.table + " WHERE wtgs_id=\'" + str(wtgs_path['wtgs_id'].iloc[0]) + "\'"
+        latest_cal_time = pd.read_sql(sql=sqlstr, con=conn)
+        conn.close()
+        if latest_cal_time['MAX(time)'].iloc[0] is None:
+            start_time = "2018-01-01 00:00:00"
+        else:
+            start_time = str(latest_cal_time['MAX(time)'].iloc[0])  # 已经计算的最新时间
+        end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')[0:10] + " 00:00:00"
+        print(str(wtgs_path['wtgs_id'].iloc[0]), start_time, end_time)
+        Turbine(wtgs_path, start_time, end_time)
 
     def farm_path(self):
         cal_farm_table_path = {}
@@ -390,6 +391,4 @@ class main:
         return cal_farm_list,cal_farm_table_path
 
 if __name__=="__main__":
-    for table,time_delta in config.TABLE_MINS_ARGV.items():
-        print('run time:'+datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        main(table, int(time_delta),config.ANALYSOR)
+    main()
