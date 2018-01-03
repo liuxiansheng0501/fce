@@ -42,7 +42,7 @@ class Component: # 部件级别
             id = np.where(res == max(res))
             self.deterioration_data_name['status'].iloc[i] = config.STATUS_LEVEL[id[0][0]]
             self.eva_res[self.weight_data.index[i]]= config.STATUS_LEVEL[id[0][0]]
-        # self.deterioration_data_name.to_csv(output_path+self.table+"/"+self.name+'.csv')
+        self.deterioration_data_name.to_csv(output_path+self.table+"/"+self.name+'.csv')
 
     def key_tags(self):
         self.itags={}
@@ -101,21 +101,20 @@ class Component: # 部件级别
             return 1
 
 class Turbine: # 整机
-    def __init__(self, db_path,start_time,end_time):
+    def __init__(self, db_path):
         self.unitSet= config.COM_NAME
         self.farm_name=db_path['farm_name'].iloc[0]
         self.wtgs_name=db_path['wtgs_name'].iloc[0]
         [self.tag,self.tag_set]=self.key_tags()
         self.db_path = db_path.iloc[0].tolist()
-        self.start_time = start_time
-        self.end_time = end_time
-        self.author = config.ANALYSOR
+        [self.start_time,self.end_time] = StartEndTime(self.db_path[2])
+        print('query start, from:' +self.start_time+" to: "+self.end_time+" at: " +datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.real_data=self.query_real_data(self.db_path)  # 查询真实存储值
-        # self.real_data.to_csv(output_path+"运行数据.csv")
+        self.real_data.to_csv(output_path+"运行数据.csv")
         for table, time_delta in config.TABLE_MINS_ARGV.items(): # 循环计算各计算类型
             self.table=table
             self.time_delta=int(time_delta)
-            print('run time:' + datetime.now().strftime('%Y-%m-%d %H:%M:%S'), table)
+            print('table type:' + datetime.now().strftime('%Y-%m-%d %H:%M:%S'), table)
             min_avg_data = self.mins_avg_value()  # 平均值
             self.run_data = min_avg_data[(min_avg_data['grPitchAngle1A'] < 89) & (min_avg_data['grPitchAngle2A'] < 89) & (min_avg_data['grPitchAngle3A'] < 89)]  # 非停机时间
             self.stop_data = min_avg_data[(min_avg_data['grPitchAngle1A'] >= 89) | (min_avg_data['grPitchAngle2A'] >= 89) | (min_avg_data['grPitchAngle3A'] >= 89)]  # 停机时间
@@ -159,9 +158,9 @@ class Turbine: # 整机
                         eva_res[key].append(iunit_eva.eva_res[key])
             for key in eva_res.keys(): #key --timestamp
                 export_res.append([self.db_path[0],int(self.db_path[1]),int(self.db_path[2]),key,eva_res[key][0],eva_res[key][1],eva_res[key][2],eva_res[key][3],
-                                        eva_res[key][4],eva_res[key][5],eva_res[key][6],eva_res[key][7],max(eva_res[key]),datetime.now().strftime('%Y-%m-%d %H:%M:%S'),self.author])
+                                        eva_res[key][4],eva_res[key][5],eva_res[key][6],eva_res[key][7],max(eva_res[key]),datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
             for timestamp in self.stop_data.index:
-                export_res.append([self.db_path[0], int(self.db_path[1]), int(self.db_path[2]), timestamp, 'E', 'E', 'E','E','E', 'E', 'E', 'E','E', datetime.now().strftime('%Y-%m-%d %H:%M:%S'), self.author])
+                export_res.append([self.db_path[0], int(self.db_path[1]), int(self.db_path[2]), timestamp, 'E', 'E', 'E','E','E', 'E', 'E', 'E','E', datetime.now().strftime('%Y-%m-%d %H:%M:%S'), config.ANALYSOR])
             self.export2DB(export_res)
 
     def query_real_data(self, path):
@@ -178,9 +177,9 @@ class Turbine: # 整机
             if '/' in filed:
                 filedlist=filed.split('/')
                 real_data[filed]=list((real_data[filedlist[0]]/real_data[filedlist[1]]).values)
-            elif '-' in filed and '|' in filed:
+            elif '-' in filed and '|' in filed:#扭矩设定值
                 filedlist = filed.split('-')
-                real_data[filed] = [abs(item) for item in list((real_data[filedlist[0][1:]]-real_data[filedlist[1][:-1]]).values)]
+                real_data[filed] = [abs(item) for item in list((real_data[filedlist[0][1:]]-real_data[filedlist[1][:-1]]/821.098).values)]
         return real_data
 
     def mins_avg_value(self): # 生成时间戳序列
@@ -292,16 +291,9 @@ class Turbine: # 整机
 
     def export2DB(self, export_res):
         if len(export_res) > 0:
-            if config.TOREMOTE_DB:
-                (conn, cur) = mysql_conn('192.168.0.19', 3306, config.REMOTE_DB['_user'], config.REMOTE_DB['_passwd'], 'iot_wind')
-                # (farm_name, farm_code, wtgs_id, time, gearbox, generator, pitch, converter, yaw, hydraulic, rotor_speed,
-                #  vibration, turbine, eva_time, evaluator)
-                sqlstr = "REPLACE INTO "+self.table+"  VALUES "
-                value = '('
-            else:
-                (conn, cur) = sqlite_conn()
-                sqlstr = "REPLACE INTO type_3mw_1min VALUES "
-                value = '('
+            (conn, cur) = mysql_conn('192.168.0.19', 3306, config.REMOTE_DB['_user'], config.REMOTE_DB['_passwd'], 'iot_wind')
+            sqlstr = "REPLACE INTO "+self.table+"  VALUES "
+            value = '('
             for j in range(len(export_res)):
                 item = export_res[j]
                 for i in range(len(item)):
@@ -313,7 +305,7 @@ class Turbine: # 整机
                     else:
                         value += ');'
             sqlstr += value
-            print(sqlstr)
+            # print(sqlstr)
             try:
                 cur.execute(sqlstr)
                 conn.commit()
@@ -351,7 +343,6 @@ def sqlite_conn():
 
 class main:
     def __init__(self):
-        self.author = config.ANALYSOR
         [self.cal_farm_list,self.cal_farm_table_path]=self.farm_path()
         self.loop()
 
@@ -360,25 +351,13 @@ class main:
         for farm in self.cal_farm_table_path:
             for row in range(len(self.cal_farm_table_path[farm])):
                 wtgs_path=self.cal_farm_table_path[farm][row:row + 1]
-                if wtgs_path['wtgs_id'].iloc[0]==20004003:
+                if wtgs_path['wtgs_id'].iloc[0]==30002010:
                     p.apply_async(self.multiProcessTask, args=(wtgs_path,))
         p.close()
         p.join()
 
     def multiProcessTask(self,wtgs_path):
-        # start_time = "2017-12-14 00:00:00"
-        # end_time = "2017-12-15 00:00:00"
-        conn = pymysql.connect(host='192.168.0.19', port=3306, user='llj', passwd='llj@2016', db='iot_wind',charset="utf8")
-        sqlstr = "SELECT MAX(time) FROM " + self.table + " WHERE wtgs_id=\'" + str(wtgs_path['wtgs_id'].iloc[0]) + "\'"
-        latest_cal_time = pd.read_sql(sql=sqlstr, con=conn)
-        conn.close()
-        if latest_cal_time['MAX(time)'].iloc[0] is None:
-            start_time = "2018-01-01 00:00:00"
-        else:
-            start_time = str(latest_cal_time['MAX(time)'].iloc[0])  # 已经计算的最新时间
-        end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')[0:10] + " 00:00:00"
-        print(str(wtgs_path['wtgs_id'].iloc[0]), start_time, end_time)
-        Turbine(wtgs_path, start_time, end_time)
+        Turbine(wtgs_path)
 
     def farm_path(self):
         cal_farm_table_path = {}
@@ -389,6 +368,26 @@ class main:
             farm_path.index = farm_path['wtgs_id'].tolist()
             cal_farm_table_path[farm_ch_name]=farm_path
         return cal_farm_list,cal_farm_table_path
+
+def StartEndTime(wtgs_id):
+    start_time_list=[]
+    conn = pymysql.connect(host='192.168.0.19', port=3306, user='llj', passwd='llj@2016', db='iot_wind', charset="utf8")
+    for table, time_delta in config.TABLE_MINS_ARGV.items():  # 循环计算各计算类型
+        sqlstr = "SELECT MAX(time) FROM " + table + " WHERE wtgs_id=\'" + str(wtgs_id) + "\'"
+        latest_cal_time = pd.read_sql(sql=sqlstr, con=conn)
+        if latest_cal_time['MAX(time)'].iloc[0] is None:
+            continue
+        else:
+            start_time_list.append(latest_cal_time['MAX(time)'].iloc[0].strftime('%Y-%m-%d %H:%M:%S'))
+    conn.close()
+    if len(start_time_list)>0:
+        start_time=min(start_time_list)
+    else:
+        start_time = "2018-01-01 00:00:00"
+    end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')[0:10] + " 00:00:00"
+    start_time = "2017-12-31 00:00:00"
+    end_time = "2018-01-01 00:00:00"
+    return start_time,end_time
 
 if __name__=="__main__":
     main()
