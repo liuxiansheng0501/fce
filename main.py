@@ -173,13 +173,23 @@ class Turbine: # 整机
             else: # 组合类指标
                 combinaFileds.append(self.tag_set[key])
         real_data=get.OneWtgsWithMultiTags(wtgs_id=str(path[2]),tag_list=query_field,start_time=self.start_time,end_time=self.end_time)
+        grConverterTorque=real_data['grConverterTorque'].tolist()
+        for i in range(len(grConverterTorque)):
+            if grConverterTorque[i]>10000:
+                grConverterTorque[i]=grConverterTorque[i]/821.098
+        grTorqueSetpoint = real_data['grTorqueSetpoint'].tolist()
+        for i in range(len(grConverterTorque)):
+            if grConverterTorque[i] > 10000:
+                grConverterTorque[i] = grConverterTorque[i] / 821.098
+        real_data['grConverterTorque']=grConverterTorque
+        real_data['grTorqueSetpoint']=grTorqueSetpoint
         for filed in combinaFileds:
             if '/' in filed:
                 filedlist=filed.split('/')
                 real_data[filed]=list((real_data[filedlist[0]]/real_data[filedlist[1]]).values)
             elif '-' in filed and '|' in filed:#扭矩设定值
                 filedlist = filed.split('-')
-                real_data[filed] = [abs(item) for item in list((real_data[filedlist[0][1:]]-real_data[filedlist[1][:-1]]/821.098).values)]
+                real_data[filed] = [abs(item) for item in list((real_data[filedlist[0][1:]]-real_data[filedlist[1][:-1]]).values)]
         return real_data
 
     def mins_avg_value(self): # 生成时间戳序列
