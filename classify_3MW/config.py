@@ -3,7 +3,7 @@
 # @Time    : 2017/8/14 19:41
 # @Author  : liulijun
 # @Site    : 
-# @File    : config.py
+# @File    : conf.py
 # @Software: PyCharm
 
 COM_NAME=['齿轮箱', '发电机', '变桨', '变频器', '偏航', '液压', '转速', '振动']
