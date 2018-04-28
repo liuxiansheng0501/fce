@@ -360,9 +360,9 @@ class main:
         self.loop()
 
     def loop(self):
-        p = Pool(8)
-        for farm in self.cal_farm_table_path:
-            for row in range(len(self.cal_farm_table_path[farm])):
+        p = Pool(8)#多进程
+        for farm in self.cal_farm_table_path:#逐风场
+            for row in range(len(self.cal_farm_table_path[farm])):#逐机组
                 wtgs_path=self.cal_farm_table_path[farm][row:row + 1]
                 p.apply_async(self.multiProcessTask, args=(wtgs_path,))
         p.close()
@@ -403,9 +403,9 @@ def StartEndTime(wtgs_id):
     # end_time = "2018-01-10 01:30:00"
     return start_time,end_time
 
-if __name__ == '__main__':
-    main()
-    scheduler = BlockingScheduler()
+if __name__ == '__main__':#入口
+    main()#启动运行main函数（类）
+    scheduler = BlockingScheduler()#计划性任务，定时任务
     scheduler.add_job(main, 'interval', seconds=3600, replace_existing=True)
     try:
         scheduler.start()  # 采用的是阻塞的方式，只有一个线程专职做调度的任务
